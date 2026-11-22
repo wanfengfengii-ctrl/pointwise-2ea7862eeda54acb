@@ -1,0 +1,24 @@
+{
+  "instruments": [
+    {"instrument_id": "OLD-A", "label": "旧表 A", "unit": "bar"},
+    {"instrument_id": "NEW-B", "label": "换装表 B", "unit": "bar"}
+  ],
+  "revisions": [
+    {"key": "left", "instrument": "OLD-A", "evidence": {"source": "旧表线性试车单", "records": {"bench": "旧表末值等于设定值"}}, "stages": [{"name": "直读", "map": [1, 0, 0, 1], "range": null, "evidence": "bench"}]},
+    {"key": "right-incident", "instrument": "NEW-B", "compensation_range": ["0", "3"], "evidence": {"source": "换表首轮试车单", "records": {"bench": "闭窗内末值为负倒数"}}, "stages": [{"name": "倒数换算", "map": [0, -1, 1, 0], "range": ["1/2", "2"], "evidence": "bench"}]},
+    {"key": "right-wide", "instrument": "NEW-B", "compensation_range": ["0", "4"], "evidence": {"source": "换装表台架许可单", "records": {"bench": "设定窗内末值为负二倍倒数"}}, "stages": [{"name": "增益换算", "map": [0, -2, 1, 0], "range": [1, 2], "evidence": "bench"}]},
+    {"key": "right-corrected", "instrument": "NEW-B", "supersedes": "right-wide", "compensation_range": ["0", "5/2"], "evidence": {"source": "换装表台架许可勘误单", "records": {"bench": "可调量上限改为 5/2，原换算关系继续使用"}}, "stages": [{"name": "增益换算", "map": [0, -2, 1, 0], "range": [1, 2], "evidence": "bench"}]},
+    {"key": "right-legacy", "instrument": "NEW-B", "evidence": {"source": "旧格式换装表原单", "records": {"bench": "原单仅登记换算关系"}}, "stages": [{"name": "增益换算", "map": [0, -2, 1, 0], "range": [1, 2], "evidence": "bench"}]},
+    {"key": "left-hole", "instrument": "OLD-A", "evidence": {"source": "旧表双级换算复测单", "records": {"bench": "两级互逆，设定为 1 时第一级无读数"}}, "stages": [{"name": "首级", "map": [1, 0, 1, -1], "range": [0, 2], "evidence": "bench"}, {"name": "末级", "map": [1, 0, 1, -1], "range": null, "evidence": "bench"}]},
+    {"key": "right-match", "instrument": "NEW-B", "compensation_range": ["0", "0"], "evidence": {"source": "零修正对照单", "records": {"bench": "对照表直读，台架只核准零修正"}}, "stages": [{"name": "直读", "map": [1, 0, 0, 1], "range": [0, 2], "evidence": "bench"}]}
+  ],
+  "cases": [
+    {"name": "endpoint_trap", "left": "left", "right": "right-incident", "window": ["1/2", "2"], "tolerance": "1/5", "expected": {"status": "no_feasible_offset", "range": null}},
+    {"name": "single_offset", "left": "left", "right": "right-incident", "window": ["1/2", "2"], "tolerance": "1/4", "expected": {"status": "allowed", "range": ["9/4", "9/4"]}},
+    {"name": "interior_extremum", "left": "left", "right": "right-wide", "window": ["1", "2"], "tolerance": "1/4", "expected": {"status": "allowed", "range": ["11/4", {"quadratic": [16, -8, -127], "branch": 1}]}},
+    {"name": "restricted_window", "left": "left", "right": "right-wide", "window": ["3/2", "2"], "tolerance": "1/4", "expected": {"status": "allowed", "range": ["11/4", "37/12"]}},
+    {"name": "tightened_permission", "left": "left", "right": "right-corrected", "window": ["1", "2"], "tolerance": "1/4", "expected": {"status": "no_feasible_offset", "range": null}},
+    {"name": "legacy_right", "left": "left", "right": "right-legacy", "window": ["1", "2"], "tolerance": "1/4", "expected": {"status": "missing_evidence", "range": null}},
+    {"name": "no_common_point", "left": "left-hole", "right": "right-match", "window": ["0", "2"], "tolerance": "0", "expected": {"status": "missing_evidence", "range": null}}
+  ]
+}
