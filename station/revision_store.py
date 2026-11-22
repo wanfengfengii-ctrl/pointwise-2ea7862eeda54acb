@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 from bench.stages import CalibrationStage, parse_stage, stage_data
+from exchange.envelope import canonical_json
+from station.compensation import CompensationRange, parse_compensation_range
 from station.evidence import CalibrationEvidence, decode_evidence, encode_evidence
 from station.instruments import Instrument, instrument_at, open_station
 
@@ -15,6 +17,7 @@ class FrozenRevision:
     evidence: CalibrationEvidence
     stages: tuple[CalibrationStage, ...]
     supersedes: int | None
+    compensation_range: CompensationRange | None = None
 
 
 def _check_revision_id(revision_id: int) -> None:
@@ -43,7 +46,8 @@ class RevisionStore:
                     id INTEGER PRIMARY KEY,
                     instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
                     evidence_id INTEGER NOT NULL UNIQUE REFERENCES calibration_evidence(id),
-                    supersedes INTEGER REFERENCES revisions(id)
+                    supersedes INTEGER REFERENCES revisions(id),
+                    compensation_range TEXT
                 );
                 CREATE TABLE IF NOT EXISTS revision_stages (
                     revision_id INTEGER NOT NULL REFERENCES revisions(id),
@@ -53,9 +57,13 @@ class RevisionStore:
                 );
                 COMMIT;
             ''')
+            columns = {row[1] for row in connection.execute('PRAGMA table_info(revisions)')}
+            if 'compensation_range' not in columns:
+                connection.execute('ALTER TABLE revisions ADD COLUMN compensation_range TEXT')
 
     def append(self, instrument_id: str, evidence: CalibrationEvidence,
-               stages: tuple[CalibrationStage, ...], supersedes: int | None = None) -> int:
+               stages: tuple[CalibrationStage, ...], supersedes: int | None = None,
+               compensation_range: CompensationRange | None = None) -> int:
         if not stages or len({stage.name for stage in stages}) != len(stages):
             raise ValueError('a revision requires nonempty, uniquely named stages')
         reference_ids = {reference for reference, _ in evidence.records}
@@ -66,6 +74,8 @@ class RevisionStore:
         stage_texts = tuple(json.dumps(stage_data(stage), ensure_ascii=False) for stage in stages)
         if supersedes is not None:
             _check_revision_id(supersedes)
+        range_text = None if compensation_range is None else canonical_json(
+            [str(compensation_range[0]), str(compensation_range[1])])
         with closing(open_station(self.path, 'rw')) as connection, connection:
             connection.execute('BEGIN IMMEDIATE')
             instrument_at(connection, instrument_id)
@@ -79,8 +89,9 @@ class RevisionStore:
                 'INSERT INTO calibration_evidence (content) VALUES (?)', (evidence_text,),
             ).lastrowid
             revision_id = connection.execute(
-                'INSERT INTO revisions (instrument_id, evidence_id, supersedes) VALUES (?, ?, ?)',
-                (instrument_id, evidence_id, supersedes),
+                'INSERT INTO revisions (instrument_id, evidence_id, supersedes, compensation_range) '
+                'VALUES (?, ?, ?, ?)',
+                (instrument_id, evidence_id, supersedes, range_text),
             ).lastrowid
             connection.executemany(
                 'INSERT INTO revision_stages (revision_id, position, content) VALUES (?, ?, ?)',
@@ -92,17 +103,20 @@ class RevisionStore:
         _check_revision_id(revision_id)
         with closing(open_station(self.path, 'ro')) as connection:
             row = connection.execute('''
-                SELECT r.instrument_id, e.content, r.supersedes
+                SELECT r.instrument_id, e.content, r.supersedes, r.compensation_range
                 FROM revisions AS r JOIN calibration_evidence AS e ON e.id = r.evidence_id
                 WHERE r.id = ?
             ''', (revision_id,)).fetchone()
             if row is None:
                 raise KeyError(revision_id)
-            instrument_id, evidence_text, supersedes = row
+            instrument_id, evidence_text, supersedes, range_text = row
             instrument = instrument_at(connection, instrument_id)
             stage_rows = connection.execute(
                 'SELECT content FROM revision_stages WHERE revision_id = ? ORDER BY position',
                 (revision_id,),
             )
             stages = tuple(parse_stage(json.loads(text)) for (text,) in stage_rows)
-        return FrozenRevision(revision_id, instrument, decode_evidence(evidence_text), stages, supersedes)
+        compensation_range = None if range_text is None else parse_compensation_range(
+            json.loads(range_text))
+        return FrozenRevision(revision_id, instrument, decode_evidence(evidence_text), stages,
+                              supersedes, compensation_range)

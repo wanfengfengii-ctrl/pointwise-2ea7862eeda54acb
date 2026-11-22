@@ -12,7 +12,7 @@ def receive(store: ReceiptStore, wire: str, expected_instrument: str) -> int:
         envelope = verify_envelope(wire)
         if not isinstance(expected_instrument, str) or envelope.origin.instrument_id != expected_instrument:
             raise ValueError('instrument does not match the expected identity')
-        body = decode_body(envelope.body)
+        body = decode_body(envelope.body, envelope.version)
     except (ValueError, RecursionError) as error:
         raise RejectedPiece(str(error)) from error
     return store.record(envelope, body)

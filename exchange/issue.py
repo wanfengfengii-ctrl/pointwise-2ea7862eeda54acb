@@ -6,7 +6,7 @@ from bench.fractional import FractionalMap, compose_maps
 from bench.stages import CalibrationStage
 from bench.trial import run_trial
 from exchange.calibration_body import CalibrationBody, SupportInterval, encode_body
-from exchange.envelope import PieceOrigin, encode_envelope
+from exchange.envelope import PieceOrigin, encode_versioned_envelope
 from station.revision_store import RevisionStore
 
 
@@ -57,10 +57,11 @@ def _support_atoms(cuts: set[Fraction]) -> Iterator[tuple[SupportInterval, Fract
         yield SupportInterval(lower, upper), _open_sample(lower, upper)
 
 
-def _calibration_body(stages: tuple[CalibrationStage, ...]) -> CalibrationBody:
+def _calibration_body(stages: tuple[CalibrationStage, ...],
+                      compensation_range=None) -> CalibrationBody:
     terminal, cuts = _value_relation_and_cuts(stages)
     if terminal is None:
-        return CalibrationBody(None, ())
+        return CalibrationBody(None, (), compensation_range)
     support: list[SupportInterval] = []
     # Away from the cuts, every prefix denominator and every pulled-back
     # stage boundary has constant sign. Run the actual chain on each cell.
@@ -74,13 +75,16 @@ def _calibration_body(stages: tuple[CalibrationStage, ...]) -> CalibrationBody:
             atom = SupportInterval(previous.lower, atom.upper, previous.lower_closed, atom.upper_closed)
         support.append(atom)
     if not support:
-        return CalibrationBody(None, ())
-    return CalibrationBody(terminal, tuple(support))
+        return CalibrationBody(None, (), compensation_range)
+    return CalibrationBody(terminal, tuple(support), compensation_range)
 
 
 def issue(store: RevisionStore, revision_id: int) -> IssuedPiece:
     revision = store.get(revision_id)
     origin = PieceOrigin(revision.instrument.instrument_id, revision.instrument.unit,
                          revision.revision_id, revision.evidence.source)
-    body = _calibration_body(revision.stages)
-    return IssuedPiece(origin, encode_envelope(origin, encode_body(body)))
+    permission = revision.compensation_range
+    version = 2 if permission is not None else 1
+    body = _calibration_body(revision.stages, permission)
+    return IssuedPiece(origin, encode_versioned_envelope(
+        origin, encode_body(body, version), version))

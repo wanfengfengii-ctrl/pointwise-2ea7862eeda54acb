@@ -58,13 +58,26 @@ class PieceOrigin:
 
 
 @dataclass(frozen=True)
-class V1Envelope:
+class Envelope:
+    version: int
     origin: PieceOrigin
     body: str
     digest: str
 
+    def __post_init__(self) -> None:
+        if self.version not in (1, 2):
+            raise ValueError('unsupported envelope version')
+        if not isinstance(self.body, str):
+            raise ValueError('the envelope body must be JSON text')
+        if not isinstance(self.digest, str) or not re.fullmatch('[0-9a-f]{64}', self.digest):
+            raise ValueError('invalid envelope digest')
 
-def _digest(payload: dict) -> str:
+
+V1Envelope = Envelope
+
+
+def _digest(version: int, origin: PieceOrigin, body: str) -> str:
+    payload = {'version': version, 'origin': origin.as_data(), 'body': body}
     return sha256(canonical_json(payload).encode('utf-8')).hexdigest()
 
 
@@ -72,20 +85,28 @@ def encode_envelope(origin: PieceOrigin, body: str) -> str:
     if not isinstance(body, str):
         raise ValueError('the V1 body must be JSON text')
     payload = {'version': 1, 'origin': origin.as_data(), 'body': body}
-    return canonical_json({**payload, 'digest': _digest(payload)})
+    return canonical_json({**payload, 'digest': _digest(1, origin, body)})
 
 
-def verify_envelope(encoded: str) -> V1Envelope:
+def encode_versioned_envelope(origin: PieceOrigin, body: str, version: int) -> str:
+    if version not in (1, 2):
+        raise ValueError('unsupported envelope version')
+    payload = {'version': version, 'origin': origin.as_data(), 'body': body}
+    return canonical_json({**payload, 'digest': _digest(version, origin, body)})
+
+
+def verify_envelope(encoded: str) -> Envelope:
     raw = read_json(encoded)
     if not isinstance(raw, dict) or set(raw) != {'version', 'origin', 'body', 'digest'}:
-        raise ValueError('invalid V1 envelope fields')
+        raise ValueError('invalid envelope fields')
     version = raw['version']
-    if type(version) is not int or version != 1:
+    if type(version) is not int or version not in (1, 2):
         raise ValueError('unsupported envelope version')
     body, digest = raw['body'], raw['digest']
     if not isinstance(body, str) or not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest):
         raise ValueError('invalid envelope body or digest')
-    payload = {'version': version, 'origin': raw['origin'], 'body': body}
-    if not compare_digest(_digest(payload), digest):
+    origin = PieceOrigin.from_data(raw['origin'])
+    payload = {'version': version, 'origin': origin.as_data(), 'body': body}
+    if not compare_digest(_digest(version, origin, body), digest):
         raise ValueError('envelope digest mismatch')
-    return V1Envelope(PieceOrigin.from_data(raw['origin']), body, digest)
+    return Envelope(version, origin, body, digest)

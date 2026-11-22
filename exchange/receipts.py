@@ -4,7 +4,7 @@ from pathlib import Path
 import sqlite3
 
 from exchange.calibration_body import CalibrationBody, decode_body
-from exchange.envelope import PieceOrigin, V1Envelope, canonical_json, read_json, valid_number
+from exchange.envelope import Envelope, PieceOrigin, canonical_json, read_json, valid_number
 
 
 def open_center(path: str | Path, mode: str) -> sqlite3.Connection:
@@ -20,6 +20,10 @@ class ReceivedPiece:
     origin: PieceOrigin
     body: CalibrationBody
     digest: str
+
+    @property
+    def compensation_range(self):
+        return self.body.compensation_range
 
 
 class ReceiptStore:
@@ -37,8 +41,8 @@ class ReceiptStore:
                 )
             ''')
 
-    def record(self, envelope: V1Envelope, body: CalibrationBody) -> int:
-        if decode_body(envelope.body) != body:
+    def record(self, envelope: Envelope, body: CalibrationBody) -> int:
+        if decode_body(envelope.body, envelope.version) != body:
             raise ValueError('validated evidence does not match the received text')
         with closing(open_center(self.path, 'rw')) as connection, connection:
             receipt_id = connection.execute(
